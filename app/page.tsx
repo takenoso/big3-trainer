@@ -101,6 +101,13 @@ export default function App() {
       return [{ date: today, entries: [entry] }, ...prev];
     });
   }
+  function addMealEntryForDate(date: string, entry: MealEntry) {
+    setMealRecords((prev) => {
+      const exists = prev.find((r) => r.date === date);
+      if (exists) return prev.map((r) => r.date === date ? { ...r, entries: [...r.entries, entry] } : r);
+      return [{ date, entries: [entry] }, ...prev].sort((a, b) => b.date.localeCompare(a.date));
+    });
+  }
   function removeMealEntry(date: string, id: string) {
     setMealRecords((prev) =>
       prev.map((r) => r.date === date ? { ...r, entries: r.entries.filter((e) => e.id !== id) } : r)
@@ -198,7 +205,7 @@ export default function App() {
         </header>
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-5xl mx-auto w-full pb-24 lg:pb-8">
-          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} goals={goals} onDeleteGoal={deleteGoal} />}
+          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} goals={goals} onDeleteGoal={deleteGoal} sessions={sessions} mealRecords={mealRecords} onSaveSession={saveSession} onAddMealEntryForDate={addMealEntryForDate} onRemoveMealEntry={removeMealEntry} onUpdateMealEntry={updateMealEntry} onAddWeight={addWeight} mealGoal={mealGoal} onToast={showToast} />}
           {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} weeklyMenu={weeklyMenu} onSaveWeeklyMenu={setWeeklyMenu} />}
           {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onUpdate={updateMealEntry} onToast={showToast} mealGoal={mealGoal} onSaveMealGoal={setMealGoal} />}
           {activeTab === "summary"  && <SummaryTab sessions={sessions} mealRecords={mealRecords} weightLog={weightLog} />}
@@ -234,7 +241,7 @@ export default function App() {
 // ════════════════════════════════════════════════════════════════
 // ホームタブ
 // ════════════════════════════════════════════════════════════════
-function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog, goals, onDeleteGoal }: {
+function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog, goals, onDeleteGoal, sessions, mealRecords, onSaveSession, onAddMealEntryForDate, onRemoveMealEntry, onUpdateMealEntry, onAddWeight, mealGoal, onToast }: {
   profile: UserProfile;
   stats: ReturnType<typeof computeStats>;
   todaySession?: TrainingSession;
@@ -243,6 +250,15 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
   weightLog: WeightEntry[];
   goals: GoalData;
   onDeleteGoal: (type: keyof GoalData) => void;
+  sessions: TrainingSession[];
+  mealRecords: DayMealRecord[];
+  onSaveSession: (s: TrainingSession) => void;
+  onAddMealEntryForDate: (date: string, e: MealEntry) => void;
+  onRemoveMealEntry: (date: string, id: string) => void;
+  onUpdateMealEntry: (date: string, e: MealEntry) => void;
+  onAddWeight: (entry: WeightEntry) => void;
+  mealGoal: MealGoal;
+  onToast: (msg: string) => void;
 }) {
   const { wilks, total, currentRank, nextRank, progressPercent, pointsToNext } = stats;
   const todayWeight = weightLog.find((e) => e.date === todayStr())?.kg;
@@ -383,7 +399,308 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
         </div>
       )}
 
+      {/* カレンダー */}
+      <div>
+        <p className="text-xs text-slate-400 uppercase tracking-widest mb-3">Calendar</p>
+        <CalendarView
+          sessions={sessions} mealRecords={mealRecords} weightLog={weightLog}
+          onSaveSession={onSaveSession} onAddMealEntryForDate={onAddMealEntryForDate}
+          onRemoveMealEntry={onRemoveMealEntry} onUpdateMealEntry={onUpdateMealEntry}
+          onAddWeight={onAddWeight} mealGoal={mealGoal} onToast={onToast}
+        />
+      </div>
+
       <RankRoadmap currentWilks={wilks} />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// カレンダービュー
+// ════════════════════════════════════════════════════════════════
+function CalendarView({ sessions, mealRecords, weightLog, onSaveSession, onAddMealEntryForDate, onRemoveMealEntry, onUpdateMealEntry, onAddWeight, mealGoal, onToast }: {
+  sessions: TrainingSession[];
+  mealRecords: DayMealRecord[];
+  weightLog: WeightEntry[];
+  onSaveSession: (s: TrainingSession) => void;
+  onAddMealEntryForDate: (date: string, e: MealEntry) => void;
+  onRemoveMealEntry: (date: string, id: string) => void;
+  onUpdateMealEntry: (date: string, e: MealEntry) => void;
+  onAddWeight: (entry: WeightEntry) => void;
+  mealGoal: MealGoal;
+  onToast: (msg: string) => void;
+}) {
+  const today = todayStr();
+  const [selDate, setSelDate] = useState(today);
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear((y) => y - 1); }
+    else setViewMonth((m) => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear((y) => y + 1); }
+    else setViewMonth((m) => m + 1);
+  }
+
+  const firstDOW = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells: (string | null)[] = Array(firstDOW).fill(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+
+  const selSession    = sessions.find((s) => s.date === selDate);
+  const selMeals      = mealRecords.find((r) => r.date === selDate);
+  const selWeightEntry = weightLog.find((e) => e.date === selDate);
+
+  return (
+    <div className="rounded-2xl border border-[#1a2f5a] bg-[#0a1224] overflow-hidden">
+      {/* 月ナビ */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#1a2f5a]/60">
+        <button onClick={prevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-[#0e1a36] transition-colors text-lg">‹</button>
+        <span className="text-sm font-bold">{viewYear}年{viewMonth + 1}月</span>
+        <button onClick={nextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-[#0e1a36] transition-colors text-lg">›</button>
+      </div>
+
+      {/* 曜日ヘッダー */}
+      <div className="grid grid-cols-7 border-b border-[#1a2f5a]/40">
+        {["日","月","火","水","木","金","土"].map((d, i) => (
+          <div key={d} className={`py-1.5 text-center text-[10px] font-semibold ${i===0?"text-red-400":i===6?"text-blue-400":"text-slate-500"}`}>{d}</div>
+        ))}
+      </div>
+
+      {/* グリッド */}
+      <div className="grid grid-cols-7">
+        {cells.map((date, i) => {
+          if (!date) return <div key={i} className="min-h-[62px] border-b border-r border-[#1a2f5a]/20" />;
+          const dow = (firstDOW + parseInt(date.slice(-2)) - 1) % 7;
+          const hasSess  = sessions.some((s) => s.date === date);
+          const hasMeals = mealRecords.some((r) => r.date === date && r.entries.length > 0);
+          const hasWt    = weightLog.some((e) => e.date === date);
+          const kcal     = mealRecords.find((r) => r.date === date)?.entries.reduce((a, e) => a + e.kcal, 0) ?? 0;
+          const isToday  = date === today;
+          const isSel    = date === selDate;
+          const dayNum   = parseInt(date.slice(-2));
+          return (
+            <button key={date} onClick={() => setSelDate(date)}
+              className={`min-h-[62px] p-1 border-b border-r border-[#1a2f5a]/20 flex flex-col items-center gap-0.5 transition-all hover:bg-[#0e1a36]/60 ${isSel ? "bg-lime-400/8 ring-1 ring-inset ring-lime-400/25" : ""}`}>
+              <span className={`text-[11px] font-bold leading-none mt-0.5 ${
+                isToday ? "bg-lime-400 text-[#060c18] rounded-full w-5 h-5 flex items-center justify-center text-[10px]"
+                : dow===0 ? "text-red-400" : dow===6 ? "text-blue-400" : "text-slate-300"
+              }`}>{dayNum}</span>
+              <div className="flex gap-px flex-wrap justify-center">
+                {hasSess  && <span className="text-[9px] leading-none">🏋️</span>}
+                {hasMeals && <span className="text-[9px] leading-none">🥗</span>}
+                {hasWt    && <span className="text-[9px] leading-none">⚖️</span>}
+              </div>
+              {kcal > 0 && <span className="text-[8px] text-slate-500 leading-none">{Math.round(kcal)}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 日別詳細パネル */}
+      <div className="border-t border-[#1a2f5a]/60 px-4 py-3">
+        <p className="text-xs font-bold text-slate-400 mb-3">{fmtDate(selDate)}</p>
+        <DayDetailPanel
+          key={selDate}
+          date={selDate}
+          session={selSession}
+          meals={selMeals}
+          weightEntry={selWeightEntry}
+          onSaveSession={onSaveSession}
+          onAddMealEntry={(e) => onAddMealEntryForDate(selDate, e)}
+          onRemoveMealEntry={(id) => onRemoveMealEntry(selDate, id)}
+          onUpdateMealEntry={(e) => onUpdateMealEntry(selDate, e)}
+          onAddWeight={onAddWeight}
+          onToast={onToast}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── 日別編集パネル ──────────────────────────────────────────────
+function DayDetailPanel({ date, session, meals, weightEntry, onSaveSession, onAddMealEntry, onRemoveMealEntry, onUpdateMealEntry, onAddWeight, onToast }: {
+  date: string;
+  session?: TrainingSession;
+  meals?: DayMealRecord;
+  weightEntry?: WeightEntry;
+  onSaveSession: (s: TrainingSession) => void;
+  onAddMealEntry: (e: MealEntry) => void;
+  onRemoveMealEntry: (id: string) => void;
+  onUpdateMealEntry: (e: MealEntry) => void;
+  onAddWeight: (entry: WeightEntry) => void;
+  onToast: (msg: string) => void;
+}) {
+  const [wInput, setWInput]           = useState(weightEntry ? String(weightEntry.kg) : "");
+  const [showMealAdd, setShowMealAdd] = useState(false);
+  const [mealAdd, setMealAdd]         = useState({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+  const [editMealId, setEditMealId]   = useState<string | null>(null);
+  const [editMealVals, setEditMealVals] = useState({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+  const [editSess, setEditSess]       = useState<TrainingSession | undefined>(session);
+
+  const entries   = meals?.entries ?? [];
+  const totalKcal = entries.reduce((a, e) => a + e.kcal, 0);
+  const totalP    = entries.reduce((a, e) => a + e.protein, 0);
+  const totalF    = entries.reduce((a, e) => a + e.fat, 0);
+  const totalC    = entries.reduce((a, e) => a + e.carbs, 0);
+
+  function startMealEdit(e: MealEntry) {
+    setEditMealId(e.id);
+    setEditMealVals({ name: e.name, kcal: String(e.kcal), protein: String(e.protein), fat: String(e.fat), carbs: String(e.carbs) });
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* ── 体重 ── */}
+      <div className="rounded-xl bg-[#060c18] border border-[#1a2f5a] p-3">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">⚖️ 体重</p>
+        <div className="flex gap-2 items-center">
+          <input type="text" inputMode="decimal" value={wInput} onChange={(e) => setWInput(e.target.value)}
+            placeholder={weightEntry ? String(weightEntry.kg) : "例: 78.5"}
+            className="flex-1 rounded-lg bg-[#0a1224] border border-[#1a2f5a] px-3 py-1.5 text-sm focus:outline-none focus:border-lime-400/50" />
+          <span className="text-xs text-slate-500 shrink-0">kg</span>
+          <button onClick={() => {
+            const kg = parseFloat(wInput);
+            if (!isNaN(kg) && kg > 0) { onAddWeight({ date, kg }); onToast("体重を保存しました"); }
+          }} className="rounded-lg bg-lime-400 px-4 py-1.5 text-xs font-black text-[#060c18] hover:bg-lime-300 transition-colors">保存</button>
+        </div>
+        {weightEntry && <p className="text-[10px] text-slate-500 mt-1">現在の記録: {weightEntry.kg} kg</p>}
+      </div>
+
+      {/* ── 食事 ── */}
+      <div className="rounded-xl bg-[#060c18] border border-[#1a2f5a] p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">🥗 食事</p>
+          {totalKcal > 0 && <p className="text-[10px] text-slate-500">{totalKcal.toFixed(1)} kcal · P:{totalP.toFixed(1)} F:{totalF.toFixed(1)} C:{totalC.toFixed(1)}</p>}
+        </div>
+        <div className="space-y-1.5 mb-2">
+          {entries.length === 0 && !showMealAdd && <p className="text-xs text-slate-600 text-center py-1">記録なし</p>}
+          {entries.map((e) => (
+            <div key={e.id} className="rounded-lg bg-[#0a1224] border border-[#1a2f5a]/50 overflow-hidden">
+              {editMealId === e.id ? (
+                <div className="p-2 space-y-1.5">
+                  <input type="text" value={editMealVals.name} onChange={(ev) => setEditMealVals((f) => ({ ...f, name: ev.target.value }))}
+                    className="w-full rounded bg-[#060c18] border border-[#1a2f5a] px-2 py-1 text-xs focus:outline-none focus:border-lime-400/50" />
+                  <div className="grid grid-cols-4 gap-1">
+                    {([["kcal","kcal"],["protein","P"],["fat","F"],["carbs","C"]] as const).map(([k, label]) => (
+                      <div key={k}>
+                        <p className="text-[9px] text-slate-500 mb-0.5">{label}</p>
+                        <input type="text" inputMode="decimal" value={editMealVals[k]}
+                          onChange={(ev) => setEditMealVals((f) => ({ ...f, [k]: ev.target.value }))}
+                          className="w-full rounded bg-[#060c18] border border-[#1a2f5a] px-1 py-1 text-[11px] text-center focus:outline-none focus:border-lime-400/50" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => {
+                      onUpdateMealEntry({ ...e, name: editMealVals.name.trim() || e.name, kcal: parseFloat(editMealVals.kcal) || 0, protein: parseFloat(editMealVals.protein) || 0, fat: parseFloat(editMealVals.fat) || 0, carbs: parseFloat(editMealVals.carbs) || 0 });
+                      setEditMealId(null); onToast("更新しました");
+                    }} className="flex-1 rounded bg-lime-400 py-1 text-xs font-black text-[#060c18]">保存</button>
+                    <button onClick={() => setEditMealId(null)} className="px-2 rounded border border-[#1a2f5a] text-xs text-slate-400">キャンセル</button>
+                    <button onClick={() => { onRemoveMealEntry(e.id); setEditMealId(null); onToast("削除しました"); }}
+                      className="px-2 rounded border border-red-500/30 text-xs text-red-400 hover:bg-red-400/10">削除</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => startMealEdit(e)} className="w-full flex items-center justify-between px-3 py-2 hover:bg-[#0e1a36]/40 transition-colors text-left">
+                  <div>
+                    <p className="text-xs font-semibold">{e.name}{e.amount && <span className="text-slate-500 font-normal ml-1">{e.amount}{e.unit}</span>}</p>
+                    <p className="text-[10px] text-slate-500">P:{e.protein.toFixed(1)} F:{e.fat.toFixed(1)} C:{e.carbs.toFixed(1)}g</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs font-bold">{e.kcal.toFixed(1)}<span className="text-slate-500 font-normal">kcal</span></span>
+                    <span className="text-[10px] text-slate-500">✏️</span>
+                  </div>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {showMealAdd ? (
+          <div className="space-y-1.5 border-t border-[#1a2f5a]/40 pt-2">
+            <input type="text" value={mealAdd.name} onChange={(e) => setMealAdd((f) => ({ ...f, name: e.target.value }))}
+              placeholder="食事名" className="w-full rounded-lg bg-[#0a1224] border border-[#1a2f5a] px-3 py-1.5 text-xs focus:outline-none focus:border-lime-400/50" />
+            <div className="grid grid-cols-4 gap-1">
+              {([["kcal","kcal"],["protein","P"],["fat","F"],["carbs","C"]] as const).map(([k, label]) => (
+                <div key={k}>
+                  <p className="text-[9px] text-slate-500 mb-0.5">{label}</p>
+                  <input type="text" inputMode="decimal" value={mealAdd[k]}
+                    onChange={(e) => setMealAdd((f) => ({ ...f, [k]: e.target.value }))}
+                    className="w-full rounded bg-[#0a1224] border border-[#1a2f5a] px-1 py-1 text-[11px] text-center focus:outline-none focus:border-lime-400/50" />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={() => {
+                if (!mealAdd.name.trim()) return;
+                onAddMealEntry({ id: genId(), time: "記録", name: mealAdd.name.trim(), kcal: parseFloat(mealAdd.kcal) || 0, protein: parseFloat(mealAdd.protein) || 0, fat: parseFloat(mealAdd.fat) || 0, carbs: parseFloat(mealAdd.carbs) || 0 });
+                setMealAdd({ name: "", kcal: "", protein: "", fat: "", carbs: "" }); setShowMealAdd(false); onToast("追加しました");
+              }} className="flex-1 rounded-lg bg-lime-400 py-1.5 text-xs font-black text-[#060c18] hover:bg-lime-300">追加</button>
+              <button onClick={() => setShowMealAdd(false)} className="px-3 rounded-lg border border-[#1a2f5a] text-xs text-slate-400 hover:text-white">キャンセル</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowMealAdd(true)} className="w-full rounded-lg border border-dashed border-[#1a2f5a] py-1.5 text-xs text-slate-500 hover:text-lime-400 hover:border-lime-400/30 transition-all">＋ 食事を追加</button>
+        )}
+      </div>
+
+      {/* ── トレーニング ── */}
+      <div className="rounded-xl bg-[#060c18] border border-[#1a2f5a] p-3">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">🏋️ トレーニング</p>
+        {!editSess ? (
+          <p className="text-xs text-slate-600 text-center py-1">記録なし</p>
+        ) : (
+          <div className="space-y-3">
+            {editSess.exercises.map((ex, ei) => (
+              <div key={ei}>
+                <p className="text-xs font-semibold text-slate-300 mb-1.5">{ex.name}</p>
+                <div className="space-y-1">
+                  {ex.sets.map((st, si) => (
+                    <div key={si} className="grid grid-cols-[1.5rem_1fr_auto_1fr] items-center gap-1.5">
+                      <span className="text-[10px] text-slate-500 text-center">{si + 1}</span>
+                      <div className="flex items-center gap-1">
+                        <input type="text" inputMode="decimal" value={st.weight}
+                          onChange={(ev) => setEditSess((prev) => {
+                            if (!prev) return prev;
+                            return { ...prev, exercises: prev.exercises.map((ex2, ei2) =>
+                              ei2 !== ei ? ex2 : { ...ex2, sets: ex2.sets.map((s2, si2) =>
+                                si2 !== si ? s2 : { ...s2, weight: parseFloat(ev.target.value) || 0 }
+                              )}
+                            )};
+                          })}
+                          className="w-full rounded bg-[#0a1224] border border-[#1a2f5a] px-2 py-1 text-xs text-center focus:outline-none focus:border-lime-400/50" />
+                        <span className="text-[10px] text-slate-500 shrink-0">kg</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 px-0.5">×</span>
+                      <div className="flex items-center gap-1">
+                        <input type="text" inputMode="numeric" value={st.reps}
+                          onChange={(ev) => setEditSess((prev) => {
+                            if (!prev) return prev;
+                            return { ...prev, exercises: prev.exercises.map((ex2, ei2) =>
+                              ei2 !== ei ? ex2 : { ...ex2, sets: ex2.sets.map((s2, si2) =>
+                                si2 !== si ? s2 : { ...s2, reps: parseInt(ev.target.value) || 0 }
+                              )}
+                            )};
+                          })}
+                          className="w-full rounded bg-[#0a1224] border border-[#1a2f5a] px-2 py-1 text-xs text-center focus:outline-none focus:border-lime-400/50" />
+                        <span className="text-[10px] text-slate-500 shrink-0">回</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button onClick={() => { onSaveSession(editSess); onToast("トレーニングを保存しました"); }}
+              className="w-full rounded-lg border border-lime-400/20 bg-lime-400/5 py-1.5 text-xs font-bold text-lime-400 hover:bg-lime-400/10 transition-colors">
+              💾 保存する
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
