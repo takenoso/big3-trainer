@@ -25,6 +25,11 @@ function safeWilks(bodyweightKg: number, totalKg: number): number {
   if (bodyweightKg < 40 || bodyweightKg > 635 || totalKg <= 0) return 0;
   return calculateWilksScore(bodyweightKg, totalKg);
 }
+function sig1(n: number): number {
+  if (n <= 0) return 0;
+  const p = Math.pow(10, Math.floor(Math.log10(n)));
+  return Math.round(n / p) * p;
+}
 function computeStats(p: UserProfile) {
   const total = p.bench1RM + p.squat1RM + p.deadlift1RM;
   const wilks = safeWilks(p.bodyweightKg, total);
@@ -44,6 +49,9 @@ function makeDefaultSession(menu: MenuTemplateItem[] = DEFAULT_MENU): TrainingSe
 type MenuTemplateItem = { exercise: string; sets: number; reps: number; weightKg: number };
 type WeeklyMenu = Record<number, MenuTemplateItem[]>; // 0=Sun 1=Mon ... 6=Sat
 type ChatMsg = { role: "user" | "assistant"; content: string; usage?: { input: number; output: number } };
+type GoalEntry = { text: string; savedAt: string };
+type GoalData = { daily: GoalEntry | null; month1: GoalEntry | null; month6: GoalEntry | null };
+const DEFAULT_GOALS: GoalData = { daily: null, month1: null, month6: null };
 type Tab = "home" | "training" | "meal" | "summary" | "planning" | "settings";
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const NAV_SIDEBAR: { id: Tab; label: string; icon: string }[] = [
@@ -68,6 +76,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useLocalStorage<ChatMsg[]>("b3_chat_msgs", []);
   const [chatTokens,   setChatTokens]   = useLocalStorage<{ input: number; output: number }>("b3_chat_tokens", { input: 0, output: 0 });
   const [weeklyMenu,   setWeeklyMenu]   = useLocalStorage<WeeklyMenu>("b3_weekly_menu", {});
+  const [goals,        setGoals]        = useLocalStorage<GoalData>("b3_goals", DEFAULT_GOALS);
   const [toast, setToast] = useState("");
 
   function showToast(msg: string) {
@@ -102,6 +111,9 @@ export default function App() {
   function addWeight(entry: WeightEntry) {
     setWeightLog((prev) => [entry, ...prev.filter((e) => e.date !== entry.date)]);
     setProfile((prev) => ({ ...prev, bodyweightKg: entry.kg }));
+  }
+  function saveGoal(type: keyof GoalData, text: string) {
+    setGoals((prev) => ({ ...prev, [type]: { text, savedAt: todayStr() } }));
   }
 
   const stats = computeStats(profile);
@@ -156,12 +168,12 @@ export default function App() {
         </nav>
         <div className="px-5 py-4 border-t border-[#1a2f5a]/30">
           <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">WILKS</p>
-          <p className="text-2xl font-black">{stats.wilks.toFixed(1)}</p>
+          <p className="text-2xl font-black">{sig1(stats.wilks)}</p>
           <div className="mt-1.5 h-1.5 w-full rounded-full bg-[#0e1a36] overflow-hidden">
             <div className="h-full rounded-full transition-all duration-700"
               style={{ width: `${stats.progressPercent}%`, background: `linear-gradient(90deg,${stats.currentRank.color},${stats.nextRank?.color ?? stats.currentRank.color})` }} />
           </div>
-          {stats.nextRank && <p className="text-[10px] text-slate-500 mt-1">あと <span className="text-lime-400 font-bold">{stats.pointsToNext.toFixed(1)}pts</span></p>}
+          {stats.nextRank && <p className="text-[10px] text-slate-500 mt-1">あと <span className="text-lime-400 font-bold">{sig1(stats.pointsToNext)}pts</span></p>}
         </div>
       </aside>
 
@@ -180,11 +192,11 @@ export default function App() {
         </header>
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-5xl mx-auto w-full pb-24 lg:pb-8">
-          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} />}
+          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} goals={goals} />}
           {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} weeklyMenu={weeklyMenu} onSaveWeeklyMenu={setWeeklyMenu} />}
           {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onUpdate={updateMealEntry} onToast={showToast} />}
           {activeTab === "summary"  && <SummaryTab sessions={sessions} mealRecords={mealRecords} weightLog={weightLog} />}
-          {activeTab === "planning" && <PlanningTab systemContext={planningSystem} messages={chatMessages} setMessages={setChatMessages} sessionTokens={chatTokens} setSessionTokens={setChatTokens} />}
+          {activeTab === "planning" && <PlanningTab systemContext={planningSystem} messages={chatMessages} setMessages={setChatMessages} sessionTokens={chatTokens} setSessionTokens={setChatTokens} onSaveGoal={saveGoal} />}
           {activeTab === "settings" && <SettingsTab profile={profile} onSaveProfile={(p)=>{setProfile(p);showToast("プロフィールを保存しました");}} />}
         </main>
       </div>
@@ -216,13 +228,14 @@ export default function App() {
 // ════════════════════════════════════════════════════════════════
 // ホームタブ
 // ════════════════════════════════════════════════════════════════
-function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog }: {
+function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog, goals }: {
   profile: UserProfile;
   stats: ReturnType<typeof computeStats>;
   todaySession?: TrainingSession;
   todayMeals?: DayMealRecord;
   onNavigate: (t: Tab) => void;
   weightLog: WeightEntry[];
+  goals: GoalData;
 }) {
   const { wilks, total, currentRank, nextRank, progressPercent, pointsToNext } = stats;
   const todayWeight = weightLog.find((e) => e.date === todayStr())?.kg;
@@ -255,7 +268,7 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">称号</p>
               <div className="flex items-center gap-2 mb-1.5"><span className="text-2xl">{currentRank.icon}</span><h3 className="text-2xl font-black" style={{ color: currentRank.color }}>{currentRank.labelJa}</h3></div>
-              <div className="flex items-baseline gap-1"><span className="text-4xl font-black">{wilks.toFixed(1)}</span><span className="text-sm text-slate-400">WILKS</span></div>
+              <div className="flex items-baseline gap-1"><span className="text-4xl font-black">{sig1(wilks)}</span><span className="text-sm text-slate-400">WILKS</span></div>
             </div>
             <div className="text-right space-y-1">
               {[["BN",profile.bench1RM],["SQ",profile.squat1RM],["DL",profile.deadlift1RM]].map(([l,v]) => (
@@ -272,7 +285,7 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
             <div className="mt-4">
               <div className="flex justify-between text-xs text-slate-400 mb-1.5">
                 <span>{currentRank.labelJa}</span>
-                <span>あと<span className="text-lime-400 font-bold"> {pointsToNext.toFixed(1)}pts </span>で<span style={{color:nextRank.color}}>{nextRank.labelJa}</span></span>
+                <span>あと<span className="text-lime-400 font-bold"> {sig1(pointsToNext)}pts </span>で<span style={{color:nextRank.color}}>{nextRank.labelJa}</span></span>
               </div>
               <div className="h-2 w-full rounded-full bg-[#0e1a36] overflow-hidden">
                 <div className="h-full rounded-full transition-all duration-700" style={{ width:`${progressPercent}%`, background:`linear-gradient(90deg,${currentRank.color},${nextRank.color})` }} />
@@ -329,6 +342,31 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
           </div>
         ))}
       </div>
+
+      {/* 目標カード */}
+      {(goals.daily || goals.month1 || goals.month6) && (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400 uppercase tracking-widest">Goals</p>
+          <div className="space-y-3">
+            {([
+              { key: "daily"  as keyof GoalData, label: "今日の目標",    icon: "🎯", color: "#a3e635" },
+              { key: "month1" as keyof GoalData, label: "1ヶ月後の目標", icon: "📅", color: "#60a5fa" },
+              { key: "month6" as keyof GoalData, label: "半年後の目標",  icon: "🏆", color: "#f59e0b" },
+            ] as const).filter(({ key }) => goals[key]).map(({ key, label, icon, color }) => (
+              <div key={key} className="rounded-2xl border bg-[#0a1224] p-4" style={{ borderColor: color + "30" }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span>{icon}</span>
+                  <p className="text-xs font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
+                  {goals[key]?.savedAt && (
+                    <p className="text-[10px] text-slate-500 ml-auto">{fmtDate(goals[key]!.savedAt)}</p>
+                  )}
+                </div>
+                <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{goals[key]!.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <RankRoadmap currentWilks={wilks} />
     </div>
@@ -602,7 +640,7 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
                   className="text-sm font-bold bg-transparent border-b border-transparent focus:border-lime-400/50 focus:outline-none w-full"
                 />
                 {ex.sets.length > 0 && ex.sets[0].weight > 0 && ex.sets[0].reps >= 1 && ex.sets[0].reps <= 30 && (
-                  <p className="text-xs text-slate-500">推定1RM: {estimateOneRepMax(ex.sets[0].weight, ex.sets[0].reps)}kg</p>
+                  <p className="text-xs text-slate-500">推定1RM: {sig1(estimateOneRepMax(ex.sets[0].weight, ex.sets[0].reps))}kg</p>
                 )}
               </div>
             </div>
@@ -1226,15 +1264,17 @@ const PLANNING_STARTERS = [
   "疲労が溜まってるので軽めのメニューを",
 ];
 
-function PlanningTab({ systemContext, messages, setMessages, sessionTokens, setSessionTokens }: {
+function PlanningTab({ systemContext, messages, setMessages, sessionTokens, setSessionTokens, onSaveGoal }: {
   systemContext: string;
   messages: ChatMsg[];
   setMessages: (action: ChatMsg[] | ((prev: ChatMsg[]) => ChatMsg[])) => void;
   sessionTokens: { input: number; output: number };
   setSessionTokens: (action: { input: number; output: number } | ((prev: { input: number; output: number }) => { input: number; output: number })) => void;
+  onSaveGoal: (type: keyof GoalData, text: string) => void;
 }) {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [savingGoalIdx, setSavingGoalIdx] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -1311,23 +1351,52 @@ function PlanningTab({ systemContext, messages, setMessages, sessionTokens, setS
         {messages.map((msg, i) => {
           const isLast = i === messages.length - 1;
           const streaming = isStreaming && isLast && msg.role === "assistant";
+          const showGoalBtn = msg.role === "assistant" && !streaming && msg.content.length > 0;
           return (
             <div key={i} className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
               {msg.role === "assistant" && (
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#0e1a36] border border-[#1a2f5a] mt-1 text-sm">💬</div>
               )}
-              <div className={`rounded-2xl px-4 py-3 max-w-[80%] ${
-                msg.role === "user" ? "bg-[#1a2f5a] text-white rounded-tr-sm" : "bg-[#0a1224] border border-[#1a2f5a] text-slate-200 rounded-tl-sm"
-              }`}>
-                {msg.content === "" && streaming ? (
-                  <div className="flex gap-1 py-1">{[0,1,2].map((j)=><div key={j} className="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400" style={{animationDelay:`${j*0.2}s`}}/>)}</div>
-                ) : (
-                  <p className={`text-sm leading-relaxed whitespace-pre-wrap ${streaming && msg.content ? "streaming-cursor" : ""}`}>{msg.content}</p>
-                )}
-                {msg.role === "assistant" && msg.usage && (
-                  <p className="text-[10px] text-slate-500 mt-2 pt-1.5 border-t border-[#1a2f5a]/60">
-                    🔢 入力 {msg.usage.input.toLocaleString()} / 出力 {msg.usage.output.toLocaleString()} トークン
-                  </p>
+              <div className="flex flex-col gap-1.5 max-w-[80%]">
+                <div className={`rounded-2xl px-4 py-3 ${
+                  msg.role === "user" ? "bg-[#1a2f5a] text-white rounded-tr-sm" : "bg-[#0a1224] border border-[#1a2f5a] text-slate-200 rounded-tl-sm"
+                }`}>
+                  {msg.content === "" && streaming ? (
+                    <div className="flex gap-1 py-1">{[0,1,2].map((j)=><div key={j} className="typing-dot h-1.5 w-1.5 rounded-full bg-slate-400" style={{animationDelay:`${j*0.2}s`}}/>)}</div>
+                  ) : (
+                    <p className={`text-sm leading-relaxed whitespace-pre-wrap ${streaming && msg.content ? "streaming-cursor" : ""}`}>{msg.content}</p>
+                  )}
+                  {msg.role === "assistant" && msg.usage && (
+                    <p className="text-[10px] text-slate-500 mt-2 pt-1.5 border-t border-[#1a2f5a]/60">
+                      🔢 入力 {msg.usage.input.toLocaleString()} / 出力 {msg.usage.output.toLocaleString()} トークン
+                    </p>
+                  )}
+                </div>
+                {showGoalBtn && (
+                  savingGoalIdx === i ? (
+                    <div className="flex gap-1.5 flex-wrap">
+                      {([
+                        { type: "daily"  as keyof GoalData, label: "🎯 今日の目標",    color: "text-lime-400 border-lime-400/30" },
+                        { type: "month1" as keyof GoalData, label: "📅 1ヶ月後",       color: "text-blue-400 border-blue-400/30" },
+                        { type: "month6" as keyof GoalData, label: "🏆 半年後",        color: "text-amber-400 border-amber-400/30" },
+                      ] as const).map(({ type, label, color }) => (
+                        <button key={type}
+                          onClick={() => { onSaveGoal(type, msg.content); setSavingGoalIdx(null); }}
+                          className={`rounded-lg border px-3 py-1 text-xs font-semibold bg-[#0a1224] hover:bg-[#0e1a36] transition-all ${color}`}>
+                          {label}
+                        </button>
+                      ))}
+                      <button onClick={() => setSavingGoalIdx(null)}
+                        className="rounded-lg border border-[#1a2f5a] px-3 py-1 text-xs text-slate-500 bg-[#0a1224] hover:text-white transition-all">
+                        キャンセル
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setSavingGoalIdx(i)}
+                      className="self-start rounded-lg border border-[#1a2f5a] px-3 py-1 text-xs text-slate-400 bg-[#0a1224] hover:border-lime-400/30 hover:text-lime-400 transition-all">
+                      📌 目標として保存
+                    </button>
+                  )
                 )}
               </div>
               {msg.role === "user" && (
@@ -1430,7 +1499,7 @@ function SettingsTab({ profile, onSaveProfile }: {
           return (
             <div className="rounded-xl bg-[#0e1a36] border border-[#1a2f5a] p-3 flex justify-between items-center">
               <span className="text-xs text-slate-400">計算後のWILKS</span>
-              <span className="font-black text-lime-400">{w > 0 ? w.toFixed(1) : "—"}</span>
+              <span className="font-black text-lime-400">{w > 0 ? sig1(w) : "—"}</span>
             </div>
           );
         })()}
