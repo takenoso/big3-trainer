@@ -94,6 +94,11 @@ export default function App() {
       prev.map((r) => r.date === date ? { ...r, entries: r.entries.filter((e) => e.id !== id) } : r)
     );
   }
+  function updateMealEntry(date: string, entry: MealEntry) {
+    setMealRecords((prev) =>
+      prev.map((r) => r.date === date ? { ...r, entries: r.entries.map((e) => e.id === entry.id ? entry : e) } : r)
+    );
+  }
   function addWeight(entry: WeightEntry) {
     setWeightLog((prev) => [entry, ...prev.filter((e) => e.date !== entry.date)]);
     setProfile((prev) => ({ ...prev, bodyweightKg: entry.kg }));
@@ -177,7 +182,7 @@ export default function App() {
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-5xl mx-auto w-full pb-24 lg:pb-8">
           {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} />}
           {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} weeklyMenu={weeklyMenu} onSaveWeeklyMenu={setWeeklyMenu} />}
-          {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onToast={showToast} />}
+          {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onUpdate={updateMealEntry} onToast={showToast} />}
           {activeTab === "summary"  && <SummaryTab sessions={sessions} mealRecords={mealRecords} weightLog={weightLog} />}
           {activeTab === "planning" && <PlanningTab systemContext={planningSystem} messages={chatMessages} setMessages={setChatMessages} sessionTokens={chatTokens} setSessionTokens={setChatTokens} />}
           {activeTab === "settings" && <SettingsTab profile={profile} onSaveProfile={(p)=>{setProfile(p);showToast("プロフィールを保存しました");}} />}
@@ -665,10 +670,11 @@ const MEAL_TYPES = [
 ];
 const UNIT_PRESETS = ["g", "ml", "個", "枚", "杯", "本", "切", "皿"];
 
-function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
+function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast }: {
   todayMeals?: DayMealRecord;
   onAdd: (e: MealEntry) => void;
   onRemove: (date: string, id: string) => void;
+  onUpdate: (date: string, e: MealEntry) => void;
   onToast: (msg: string) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
@@ -676,6 +682,51 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
   const [calcLoading, setCalcLoading] = useState(false);
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [advice, setAdvice] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<MealForm>(EMPTY_FORM);
+  const [editCalcLoading, setEditCalcLoading] = useState(false);
+
+  function startEdit(e: MealEntry) {
+    setEditingId(e.id);
+    setEditForm({
+      mealType: e.time,
+      name: e.name,
+      amount: e.amount != null ? String(e.amount) : "",
+      unit: e.unit ?? "g",
+      kcal: String(e.kcal),
+      protein: String(e.protein),
+      fat: String(e.fat),
+      carbs: String(e.carbs),
+    });
+  }
+  function saveEdit(e: MealEntry) {
+    onUpdate(todayMeals?.date ?? todayStr(), {
+      ...e,
+      time:    editForm.mealType || e.time,
+      name:    editForm.name.trim() || e.name,
+      kcal:    Math.round(parseFloat(editForm.kcal) || 0),
+      protein: parseFloat(editForm.protein) || 0,
+      fat:     parseFloat(editForm.fat) || 0,
+      carbs:   parseFloat(editForm.carbs) || 0,
+      amount:  editForm.amount ? parseFloat(editForm.amount) || undefined : undefined,
+      unit:    editForm.amount ? editForm.unit : undefined,
+    });
+    setEditingId(null);
+    onToast("更新しました");
+  }
+  async function autoCalcEdit() {
+    if (!editForm.name.trim() || editCalcLoading) return;
+    setEditCalcLoading(true);
+    try {
+      const foodName = editForm.amount ? `${editForm.name} ${editForm.amount}${editForm.unit}` : editForm.name;
+      const res = await fetch("/api/nutrition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ foodName }) });
+      const data = await res.json();
+      if (data.kcal !== undefined) {
+        setEditForm((f) => ({ ...f, kcal: String(data.kcal), protein: String(data.protein), fat: String(data.fat), carbs: String(data.carbs) }));
+        onToast("栄養素を再計算しました");
+      }
+    } catch { /* ignore */ } finally { setEditCalcLoading(false); }
+  }
 
   async function autoCalc() {
     if (!form.name.trim() || calcLoading) return;
@@ -829,22 +880,81 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
           <p className="text-center text-sm text-slate-500 py-4">まだ記録がありません</p>
         )}
         {entries.map((e) => (
-          <div key={e.id} className="flex items-center justify-between rounded-xl border border-[#1a2f5a] bg-[#0a1224] px-4 py-3 group">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] text-slate-500 shrink-0 w-12 text-center leading-tight">{e.time}</span>
-              <div>
-                <p className="text-sm font-semibold">
-                  {e.name}
-                  {e.amount && <span className="text-xs text-slate-400 font-normal ml-1.5">{e.amount}{e.unit}</span>}
-                </p>
-                <p className="text-xs text-slate-500">P:{e.protein}g F:{e.fat}g C:{e.carbs}g</p>
+          <div key={e.id} className="rounded-xl border border-[#1a2f5a] bg-[#0a1224] overflow-hidden">
+            {editingId === e.id ? (
+              /* ── 編集フォーム ── */
+              <div className="p-4 space-y-3">
+                {/* 食事区分 */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {MEAL_TYPES.map((mt) => (
+                    <button key={mt.value} type="button"
+                      onClick={() => setEditForm((f) => ({ ...f, mealType: mt.value }))}
+                      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${editForm.mealType === mt.value ? "bg-lime-400 text-[#060c18]" : "bg-[#0e1a36] border border-[#1a2f5a] text-slate-400 hover:text-white"}`}>
+                      {mt.label}
+                    </button>
+                  ))}
+                </div>
+                {/* 食事名 + 量 + 単位 */}
+                <div className="flex gap-2">
+                  <input type="text" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                    className="flex-1 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-1.5 text-sm focus:outline-none focus:border-lime-400/50" placeholder="食事名" />
+                  <input type="text" inputMode="decimal" value={editForm.amount} onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
+                    className="w-14 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center focus:outline-none focus:border-lime-400/50" placeholder="量" />
+                  <input type="text" value={editForm.unit} onChange={(e) => setEditForm((f) => ({ ...f, unit: e.target.value }))}
+                    className="w-12 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center focus:outline-none focus:border-lime-400/50" />
+                </div>
+                {/* 単位クイック選択 */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {UNIT_PRESETS.map((u) => (
+                    <button key={u} type="button" onClick={() => setEditForm((f) => ({ ...f, unit: u }))}
+                      className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition-all ${editForm.unit === u ? "bg-lime-400/20 border border-lime-400/40 text-lime-400" : "bg-[#0e1a36] border border-[#1a2f5a] text-slate-500 hover:text-white"}`}>
+                      {u}
+                    </button>
+                  ))}
+                </div>
+                {/* AI再計算 */}
+                <button type="button" onClick={autoCalcEdit} disabled={!editForm.name.trim() || editCalcLoading}
+                  className="w-full rounded-xl border border-lime-400/30 py-1.5 text-xs font-bold text-lime-400 hover:bg-lime-400/10 disabled:opacity-40 transition-colors flex items-center justify-center gap-1">
+                  {editCalcLoading ? <><span className="animate-spin">⏳</span> 計算中...</> : <>✨ 栄養素を再計算</>}
+                </button>
+                {/* 栄養素 */}
+                <div className="grid grid-cols-4 gap-2">
+                  {([["kcal","kcal"],["protein","タンパク質g"],["fat","脂質g"],["carbs","炭水化物g"]] as const).map(([k, label]) => (
+                    <div key={k}>
+                      <p className="text-[9px] text-slate-500 mb-1">{label}</p>
+                      <input type="text" inputMode="decimal" value={editForm[k]}
+                        onChange={(e) => setEditForm((f) => ({ ...f, [k]: e.target.value }))}
+                        className="w-full rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-xs text-center focus:outline-none focus:border-lime-400/50" />
+                    </div>
+                  ))}
+                </div>
+                {/* 操作ボタン */}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => saveEdit(e)} className="flex-1 rounded-xl bg-lime-400 py-2 font-black text-[#060c18] text-sm">保存</button>
+                  <button onClick={() => setEditingId(null)} className="px-4 rounded-xl border border-[#1a2f5a] text-sm text-slate-400 hover:text-white">キャンセル</button>
+                  <button onClick={() => { onRemove(todayMeals?.date ?? todayStr(), e.id); setEditingId(null); onToast("削除しました"); }}
+                    className="px-3 rounded-xl border border-red-500/30 text-xs text-red-400 hover:bg-red-400/10 transition-colors">削除</button>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <p className="text-sm font-black">{e.kcal}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
-              <button onClick={() => { onRemove(todayMeals?.date ?? todayStr(), e.id); onToast("削除しました"); }}
-                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-all text-sm">✕</button>
-            </div>
+            ) : (
+              /* ── 通常表示 ── */
+              <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#0e1a36]/50 transition-colors text-left" onClick={() => startEdit(e)}>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-slate-500 shrink-0 w-12 text-center leading-tight">{e.time}</span>
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {e.name}
+                      {e.amount && <span className="text-xs text-slate-400 font-normal ml-1.5">{e.amount}{e.unit}</span>}
+                    </p>
+                    <p className="text-xs text-slate-500">P:{e.protein}g F:{e.fat}g C:{e.carbs}g</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-black">{e.kcal}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
+                  <span className="text-slate-500 text-xs">✏️</span>
+                </div>
+              </button>
+            )}
           </div>
         ))}
       </div>
