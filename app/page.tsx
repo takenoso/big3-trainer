@@ -52,6 +52,8 @@ type ChatMsg = { role: "user" | "assistant"; content: string; usage?: { input: n
 type GoalEntry = { text: string; savedAt: string };
 type GoalData = { daily: GoalEntry | null; month1: GoalEntry | null; month6: GoalEntry | null };
 const DEFAULT_GOALS: GoalData = { daily: null, month1: null, month6: null };
+type MealGoal = { kcal: number; protein: number; fat: number; carbs: number };
+const DEFAULT_MEAL_GOAL: MealGoal = { kcal: 2800, protein: 180, fat: 70, carbs: 350 };
 type Tab = "home" | "training" | "meal" | "summary" | "planning" | "settings";
 const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const NAV_SIDEBAR: { id: Tab; label: string; icon: string }[] = [
@@ -77,6 +79,7 @@ export default function App() {
   const [chatTokens,   setChatTokens]   = useLocalStorage<{ input: number; output: number }>("b3_chat_tokens", { input: 0, output: 0 });
   const [weeklyMenu,   setWeeklyMenu]   = useLocalStorage<WeeklyMenu>("b3_weekly_menu", {});
   const [goals,        setGoals]        = useLocalStorage<GoalData>("b3_goals", DEFAULT_GOALS);
+  const [mealGoal,     setMealGoal]     = useLocalStorage<MealGoal>("b3_meal_goal", DEFAULT_MEAL_GOAL);
   const [toast, setToast] = useState("");
 
   function showToast(msg: string) {
@@ -114,6 +117,9 @@ export default function App() {
   }
   function saveGoal(type: keyof GoalData, text: string) {
     setGoals((prev) => ({ ...prev, [type]: { text, savedAt: todayStr() } }));
+  }
+  function deleteGoal(type: keyof GoalData) {
+    setGoals((prev) => ({ ...prev, [type]: null }));
   }
 
   const stats = computeStats(profile);
@@ -192,9 +198,9 @@ export default function App() {
         </header>
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-5xl mx-auto w-full pb-24 lg:pb-8">
-          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} goals={goals} />}
+          {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} goals={goals} onDeleteGoal={deleteGoal} />}
           {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} weeklyMenu={weeklyMenu} onSaveWeeklyMenu={setWeeklyMenu} />}
-          {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onUpdate={updateMealEntry} onToast={showToast} />}
+          {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onUpdate={updateMealEntry} onToast={showToast} mealGoal={mealGoal} onSaveMealGoal={setMealGoal} />}
           {activeTab === "summary"  && <SummaryTab sessions={sessions} mealRecords={mealRecords} weightLog={weightLog} />}
           {activeTab === "planning" && <PlanningTab systemContext={planningSystem} messages={chatMessages} setMessages={setChatMessages} sessionTokens={chatTokens} setSessionTokens={setChatTokens} onSaveGoal={saveGoal} />}
           {activeTab === "settings" && <SettingsTab profile={profile} onSaveProfile={(p)=>{setProfile(p);showToast("プロフィールを保存しました");}} />}
@@ -228,7 +234,7 @@ export default function App() {
 // ════════════════════════════════════════════════════════════════
 // ホームタブ
 // ════════════════════════════════════════════════════════════════
-function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog, goals }: {
+function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightLog, goals, onDeleteGoal }: {
   profile: UserProfile;
   stats: ReturnType<typeof computeStats>;
   todaySession?: TrainingSession;
@@ -236,10 +242,14 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
   onNavigate: (t: Tab) => void;
   weightLog: WeightEntry[];
   goals: GoalData;
+  onDeleteGoal: (type: keyof GoalData) => void;
 }) {
   const { wilks, total, currentRank, nextRank, progressPercent, pointsToNext } = stats;
   const todayWeight = weightLog.find((e) => e.date === todayStr())?.kg;
   const todayKcal = todayMeals?.entries.reduce((a, e) => a + e.kcal, 0) ?? 0;
+  const todayP    = todayMeals?.entries.reduce((a, e) => a + e.protein, 0) ?? 0;
+  const todayF    = todayMeals?.entries.reduce((a, e) => a + e.fat, 0) ?? 0;
+  const todayC    = todayMeals?.entries.reduce((a, e) => a + e.carbs, 0) ?? 0;
   const todayDone  = todaySession?.completed ?? false;
   const doneSets   = todaySession?.exercises.reduce((a, ex) => a + ex.sets.filter((s) => s.completed).length, 0) ?? 0;
   const totalSets  = todaySession?.exercises.reduce((a, ex) => a + ex.sets.length, 0) ?? 0;
@@ -310,9 +320,12 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
               )}
             </button>
             <button onClick={() => onNavigate("meal")}
-              className="rounded-xl p-3 border border-[#1a2f5a] bg-[#0e1a36] hover:bg-[#1a2f5a] transition-colors">
+              className="rounded-xl p-3 border border-[#1a2f5a] bg-[#0e1a36] hover:bg-[#1a2f5a] transition-colors text-left">
               <p className="text-xs text-slate-400 mb-1">食事</p>
-              <p className="text-sm font-black">{todayKcal}<span className="text-slate-400 font-normal text-xs"> kcal</span></p>
+              <p className="text-sm font-black">{sig1(todayKcal)}<span className="text-slate-400 font-normal text-xs"> kcal</span></p>
+              {todayKcal > 0 && (
+                <p className="text-[10px] text-slate-500 mt-0.5">P:{sig1(todayP)} F:{sig1(todayF)} C:{sig1(todayC)}</p>
+              )}
             </button>
           </div>
           <button onClick={() => onNavigate("training")}
@@ -360,6 +373,8 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
                   {goals[key]?.savedAt && (
                     <p className="text-[10px] text-slate-500 ml-auto">{fmtDate(goals[key]!.savedAt)}</p>
                   )}
+                  <button onClick={() => onDeleteGoal(key)}
+                    className="ml-1 text-slate-600 hover:text-red-400 transition-colors text-xs leading-none" title="削除">✕</button>
                 </div>
                 <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">{goals[key]!.text}</p>
               </div>
@@ -708,15 +723,19 @@ const MEAL_TYPES = [
 ];
 const UNIT_PRESETS = ["g", "ml", "個", "枚", "杯", "本", "切", "皿"];
 
-function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast }: {
+function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast, mealGoal, onSaveMealGoal }: {
   todayMeals?: DayMealRecord;
   onAdd: (e: MealEntry) => void;
   onRemove: (date: string, id: string) => void;
   onUpdate: (date: string, e: MealEntry) => void;
   onToast: (msg: string) => void;
+  mealGoal: MealGoal;
+  onSaveMealGoal: (g: MealGoal) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<MealForm>(EMPTY_FORM);
+  const [showGoalEdit, setShowGoalEdit] = useState(false);
+  const [goalForm, setGoalForm] = useState({ kcal: String(mealGoal.kcal), protein: String(mealGoal.protein), fat: String(mealGoal.fat), carbs: String(mealGoal.carbs) });
   const [calcLoading, setCalcLoading] = useState(false);
   const [adviceLoading, setAdviceLoading] = useState(false);
   const [advice, setAdvice] = useState("");
@@ -798,7 +817,6 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast }: {
   const totalP    = entries.reduce((a, e) => a + e.protein, 0);
   const totalF    = entries.reduce((a, e) => a + e.fat, 0);
   const totalC    = entries.reduce((a, e) => a + e.carbs, 0);
-  const TARGET_KCAL = 2800;
 
   async function getAdvice() {
     if (adviceLoading) return;
@@ -871,23 +889,56 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast }: {
         <div className="flex items-end justify-between mb-3">
           <div>
             <p className="text-xs text-slate-500">摂取カロリー</p>
-            <p className="text-3xl font-black">{totalKcal}<span className="text-sm text-slate-400 font-normal"> kcal</span></p>
+            <p className="text-3xl font-black">{sig1(totalKcal)}<span className="text-sm text-slate-400 font-normal"> kcal</span></p>
           </div>
-          <p className="text-sm text-slate-400">目標 <span className="font-bold text-white">{TARGET_KCAL}</span> kcal</p>
+          <button onClick={() => { setGoalForm({ kcal: String(mealGoal.kcal), protein: String(mealGoal.protein), fat: String(mealGoal.fat), carbs: String(mealGoal.carbs) }); setShowGoalEdit((v) => !v); }}
+            className="text-xs text-slate-400 hover:text-lime-400 transition-colors flex items-center gap-1">
+            ⚙️ 目標 <span className="font-bold text-white">{sig1(mealGoal.kcal)}</span> kcal
+          </button>
         </div>
+        {showGoalEdit && (
+          <div className="mb-3 rounded-xl bg-[#0e1a36] border border-[#1a2f5a] p-3 space-y-2">
+            <p className="text-xs font-bold text-lime-400">栄養目標を設定</p>
+            <div className="grid grid-cols-4 gap-2">
+              {([["kcal","カロリー","kcal"],["protein","タンパク質","g"],["fat","脂質","g"],["carbs","炭水化物","g"]] as const).map(([k, label, unit]) => (
+                <div key={k}>
+                  <p className="text-[9px] text-slate-500 mb-1">{label}</p>
+                  <div className="flex items-center gap-0.5">
+                    <input type="text" inputMode="decimal" value={goalForm[k]}
+                      onChange={(e) => setGoalForm((f) => ({ ...f, [k]: e.target.value }))}
+                      className="w-full rounded-lg bg-[#060c18] border border-[#1a2f5a] px-2 py-1.5 text-xs text-center focus:outline-none focus:border-lime-400/50" />
+                    <span className="text-[9px] text-slate-500 shrink-0">{unit}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => {
+                const k = parseFloat(goalForm.kcal) || mealGoal.kcal;
+                const p = parseFloat(goalForm.protein) || mealGoal.protein;
+                const f = parseFloat(goalForm.fat) || mealGoal.fat;
+                const c = parseFloat(goalForm.carbs) || mealGoal.carbs;
+                onSaveMealGoal({ kcal: k, protein: p, fat: f, carbs: c });
+                setShowGoalEdit(false);
+                onToast("目標を保存しました");
+              }} className="flex-1 rounded-lg bg-lime-400 py-1.5 text-xs font-black text-[#060c18]">保存</button>
+              <button onClick={() => setShowGoalEdit(false)} className="px-3 rounded-lg border border-[#1a2f5a] text-xs text-slate-400 hover:text-white">キャンセル</button>
+            </div>
+          </div>
+        )}
         <div className="h-2 w-full rounded-full bg-[#0e1a36] overflow-hidden">
-          <div className="h-full rounded-full transition-all" style={{ width:`${Math.min(100,(totalKcal/TARGET_KCAL)*100)}%`, background:"linear-gradient(90deg,#3b82f6,#a3e635)" }} />
+          <div className="h-full rounded-full transition-all" style={{ width:`${Math.min(100,(totalKcal/mealGoal.kcal)*100)}%`, background:"linear-gradient(90deg,#3b82f6,#a3e635)" }} />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-3">
           {[
-            { label:"P", name:"タンパク質", value:totalP, target:180, color:"#3b82f6" },
-            { label:"F", name:"脂質",       value:totalF, target:70,  color:"#f59e0b" },
-            { label:"C", name:"炭水化物",   value:totalC, target:350, color:"#10b981" },
+            { label:"P", name:"タンパク質", value:totalP, target:mealGoal.protein, color:"#3b82f6" },
+            { label:"F", name:"脂質",       value:totalF, target:mealGoal.fat,     color:"#f59e0b" },
+            { label:"C", name:"炭水化物",   value:totalC, target:mealGoal.carbs,   color:"#10b981" },
           ].map(({ label, name, value, target, color }) => (
             <div key={label} className="rounded-xl bg-[#0e1a36] p-2.5 text-center">
               <p className="text-[10px] text-slate-500 mb-0.5">{name}</p>
-              <p className="text-base font-black" style={{ color }}>{value}<span className="text-xs text-slate-500">g</span></p>
-              <p className="text-[10px] text-slate-500">{target}g目標</p>
+              <p className="text-base font-black" style={{ color }}>{sig1(value)}<span className="text-xs text-slate-500">g</span></p>
+              <p className="text-[10px] text-slate-500">{sig1(target)}g目標</p>
             </div>
           ))}
         </div>
@@ -984,11 +1035,11 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast }: {
                       {e.name}
                       {e.amount && <span className="text-xs text-slate-400 font-normal ml-1.5">{e.amount}{e.unit}</span>}
                     </p>
-                    <p className="text-xs text-slate-500">P:{e.protein}g F:{e.fat}g C:{e.carbs}g</p>
+                    <p className="text-xs text-slate-500">P:{sig1(e.protein)} F:{sig1(e.fat)} C:{sig1(e.carbs)}g</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-black">{e.kcal}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
+                  <p className="text-sm font-black">{sig1(e.kcal)}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
                   <span className="text-slate-500 text-xs">✏️</span>
                 </div>
               </button>
