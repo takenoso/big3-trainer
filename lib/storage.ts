@@ -22,12 +22,14 @@ export interface TrainingSession {
 }
 export interface MealEntry {
   id: string;
-  time: string;        // HH:mm
+  time: string;        // 朝食 / 昼食 / 夕食 etc. or legacy HH:mm
   name: string;
   kcal: number;
   protein: number;
   fat: number;
   carbs: number;
+  amount?: number;
+  unit?: string;
 }
 export interface DayMealRecord {
   date: string;

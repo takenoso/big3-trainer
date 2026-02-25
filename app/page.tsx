@@ -713,8 +713,17 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
 // ════════════════════════════════════════════════════════════════
 // 食事記録タブ
 // ════════════════════════════════════════════════════════════════
-type MealForm = { time: string; name: string; kcal: string; protein: string; fat: string; carbs: string };
-const EMPTY_FORM: MealForm = { time: "", name: "", kcal: "", protein: "", fat: "", carbs: "" };
+type MealForm = { mealType: string; name: string; amount: string; unit: string; kcal: string; protein: string; fat: string; carbs: string };
+const EMPTY_FORM: MealForm = { mealType: "朝食", name: "", amount: "", unit: "g", kcal: "", protein: "", fat: "", carbs: "" };
+const MEAL_TYPES = [
+  { value: "朝食",     label: "朝食" },
+  { value: "午前間食", label: "間食" },
+  { value: "昼食",     label: "昼食" },
+  { value: "午後間食", label: "間食" },
+  { value: "夕食",     label: "夕食" },
+  { value: "深夜",     label: "深夜" },
+];
+const UNIT_PRESETS = ["g", "ml", "個", "枚", "杯", "本", "切", "皿"];
 
 function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
   todayMeals?: DayMealRecord;
@@ -730,10 +739,13 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
     if (!form.name.trim() || calcLoading) return;
     setCalcLoading(true);
     try {
+      const foodNameWithAmount = form.amount
+        ? `${form.name} ${form.amount}${form.unit}`
+        : form.name;
       const res = await fetch("/api/nutrition", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ foodName: form.name }),
+        body: JSON.stringify({ foodName: foodNameWithAmount }),
       });
       const data = await res.json();
       if (data.kcal !== undefined) {
@@ -758,25 +770,27 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
   const TARGET_KCAL = 2800;
 
   function handleAdd() {
-    if (!form.name.trim()) return;
+    if (!form.name.trim() || !form.mealType) return;
     onAdd({
-      id: genId(),
-      time:    form.time || nowTime(),
+      id:      genId(),
+      time:    form.mealType,
       name:    form.name.trim(),
       kcal:    Math.round(parseFloat(form.kcal) || 0),
       protein: parseFloat(form.protein) || 0,
       fat:     parseFloat(form.fat)     || 0,
       carbs:   parseFloat(form.carbs)   || 0,
+      amount:  form.amount ? parseFloat(form.amount) || undefined : undefined,
+      unit:    form.amount ? form.unit : undefined,
     });
     setForm(EMPTY_FORM);
     setShowForm(false);
     onToast("食事を記録しました");
   }
 
-  const field = (key: keyof MealForm, label: string, type = "text", placeholder = "") => (
+  const numField = (key: "kcal" | "protein" | "fat" | "carbs", label: string, placeholder = "") => (
     <div>
       <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-widest">{label}</label>
-      <input type={type} value={form[key]} placeholder={placeholder}
+      <input type="text" inputMode="decimal" value={form[key]} placeholder={placeholder}
         onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
         className="w-full rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-2 text-sm focus:outline-none focus:border-lime-400/50" />
     </div>
@@ -824,9 +838,12 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
         {entries.map((e) => (
           <div key={e.id} className="flex items-center justify-between rounded-xl border border-[#1a2f5a] bg-[#0a1224] px-4 py-3 group">
             <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-500 w-10 shrink-0">{e.time}</span>
+              <span className="text-[10px] text-slate-500 shrink-0 w-12 text-center leading-tight">{e.time}</span>
               <div>
-                <p className="text-sm font-semibold">{e.name}</p>
+                <p className="text-sm font-semibold">
+                  {e.name}
+                  {e.amount && <span className="text-xs text-slate-400 font-normal ml-1.5">{e.amount}{e.unit}</span>}
+                </p>
                 <p className="text-xs text-slate-500">P:{e.protein}g F:{e.fat}g C:{e.carbs}g</p>
               </div>
             </div>
@@ -841,17 +858,69 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
 
       {/* 追加フォーム */}
       {showForm ? (
-        <div className="rounded-2xl border border-lime-400/20 bg-[#0a1224] p-5 space-y-3">
-          <p className="text-sm font-bold text-lime-400 mb-3">食事を追加</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[10px] text-slate-500 mb-1 uppercase tracking-widest">食事名</label>
-              <input type="text" value={form.name} placeholder="例: 鶏むね肉 + 白米"
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                className="w-full rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-2 text-sm focus:outline-none focus:border-lime-400/50" />
+        <div className="rounded-2xl border border-lime-400/20 bg-[#0a1224] p-5 space-y-4">
+          <p className="text-sm font-bold text-lime-400">食事を追加</p>
+
+          {/* 食事区分セレクター */}
+          <div>
+            <label className="block text-[10px] text-slate-500 mb-2 uppercase tracking-widest">食事区分</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {MEAL_TYPES.map((mt) => (
+                <button
+                  key={mt.value}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, mealType: mt.value }))}
+                  className={`rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+                    form.mealType === mt.value
+                      ? "bg-lime-400 text-[#060c18]"
+                      : "bg-[#0e1a36] border border-[#1a2f5a] text-slate-400 hover:border-slate-500 hover:text-white"
+                  }`}
+                >
+                  {mt.label}
+                </button>
+              ))}
             </div>
-            {field("time", "時刻", "time")}
           </div>
+
+          {/* 食事名 + 量 + 単位 */}
+          <div>
+            <label className="block text-[10px] text-slate-500 mb-1.5 uppercase tracking-widest">食事名・量・単位</label>
+            <div className="flex gap-2">
+              <input
+                type="text" value={form.name} placeholder="例: 鶏むね肉"
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                className="flex-1 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-2 text-sm focus:outline-none focus:border-lime-400/50"
+              />
+              <input
+                type="text" inputMode="decimal" value={form.amount} placeholder="100"
+                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                className="w-16 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
+              />
+              <input
+                type="text" value={form.unit} placeholder="g"
+                onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+                className="w-14 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
+              />
+            </div>
+            {/* 単位クイック選択 */}
+            <div className="flex gap-1.5 mt-2 flex-wrap">
+              {UNIT_PRESETS.map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, unit: u }))}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                    form.unit === u
+                      ? "bg-lime-400/20 border border-lime-400/40 text-lime-400"
+                      : "bg-[#0e1a36] border border-[#1a2f5a] text-slate-500 hover:text-white"
+                  }`}
+                >
+                  {u}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={autoCalc}
@@ -865,15 +934,15 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
             )}
           </button>
           <div className="grid grid-cols-2 gap-3">
-            {field("kcal",    "カロリー (kcal)", "number", "500")}
-            {field("protein", "タンパク質 (g)",  "number", "40")}
+            {numField("kcal",    "カロリー (kcal)", "500")}
+            {numField("protein", "タンパク質 (g)",  "40")}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {field("fat",   "脂質 (g)",   "number", "10")}
-            {field("carbs", "炭水化物 (g)", "number", "60")}
+            {numField("fat",   "脂質 (g)",    "10")}
+            {numField("carbs", "炭水化物 (g)", "60")}
           </div>
           <div className="flex gap-2 pt-1">
-            <button onClick={handleAdd} disabled={!form.name.trim()}
+            <button onClick={handleAdd} disabled={!form.name.trim() || !form.mealType}
               className="flex-1 rounded-xl bg-lime-400 py-2.5 font-black text-[#060c18] text-sm disabled:opacity-40">追加する</button>
             <button onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}
               className="px-4 rounded-xl border border-[#1a2f5a] text-sm text-slate-400 hover:text-white">キャンセル</button>
