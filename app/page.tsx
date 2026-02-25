@@ -42,8 +42,10 @@ function makeDefaultSession(menu: MenuTemplateItem[] = DEFAULT_MENU): TrainingSe
 
 // ── 型 ────────────────────────────────────────────────────────
 type MenuTemplateItem = { exercise: string; sets: number; reps: number; weightKg: number };
+type WeeklyMenu = Record<number, MenuTemplateItem[]>; // 0=Sun 1=Mon ... 6=Sat
 type ChatMsg = { role: "user" | "assistant"; content: string; usage?: { input: number; output: number } };
 type Tab = "home" | "training" | "meal" | "summary" | "planning" | "settings";
+const DAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const NAV_SIDEBAR: { id: Tab; label: string; icon: string }[] = [
   { id: "home",     label: "ホーム",          icon: "⊞"  },
   { id: "training", label: "トレーニング",    icon: "🏋️" },
@@ -65,7 +67,7 @@ export default function App() {
   const [weightLog,   setWeightLog]   = useLocalStorage<WeightEntry[]>("b3_weights", []);
   const [chatMessages, setChatMessages] = useLocalStorage<ChatMsg[]>("b3_chat_msgs", []);
   const [chatTokens,   setChatTokens]   = useLocalStorage<{ input: number; output: number }>("b3_chat_tokens", { input: 0, output: 0 });
-  const [menuTemplate, setMenuTemplate] = useLocalStorage<MenuTemplateItem[]>("b3_menu_tpl", DEFAULT_MENU);
+  const [weeklyMenu,   setWeeklyMenu]   = useLocalStorage<WeeklyMenu>("b3_weekly_menu", {});
   const [toast, setToast] = useState("");
 
   function showToast(msg: string) {
@@ -174,7 +176,7 @@ export default function App() {
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-5xl mx-auto w-full pb-24 lg:pb-8">
           {activeTab === "home"     && <HomeTab profile={profile} stats={stats} todaySession={todaySession} todayMeals={todayMeals} onNavigate={setActiveTab} weightLog={weightLog} />}
-          {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} menuTemplate={menuTemplate} onSaveTemplate={setMenuTemplate} />}
+          {activeTab === "training" && <TrainingTab todaySession={todaySession} onSave={saveSession} onToast={showToast} profile={profile} onUpdateProfile={setProfile} weightLog={weightLog} onAddWeight={addWeight} weeklyMenu={weeklyMenu} onSaveWeeklyMenu={setWeeklyMenu} />}
           {activeTab === "meal"     && <MealTab todayMeals={todayMeals} onAdd={addMealEntry} onRemove={removeMealEntry} onToast={showToast} />}
           {activeTab === "summary"  && <SummaryTab sessions={sessions} mealRecords={mealRecords} weightLog={weightLog} />}
           {activeTab === "planning" && <PlanningTab systemContext={planningSystem} messages={chatMessages} setMessages={setChatMessages} sessionTokens={chatTokens} setSessionTokens={setChatTokens} />}
@@ -337,7 +339,7 @@ const BIG3_MAP: Record<string, keyof UserProfile> = {
   "デッドリフト": "deadlift1RM",
 };
 
-function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, weightLog, onAddWeight, menuTemplate, onSaveTemplate }: {
+function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, weightLog, onAddWeight, weeklyMenu, onSaveWeeklyMenu }: {
   todaySession?: TrainingSession;
   onSave: (s: TrainingSession) => void;
   onToast: (msg: string) => void;
@@ -345,18 +347,21 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
   onUpdateProfile: (p: UserProfile) => void;
   weightLog: WeightEntry[];
   onAddWeight: (entry: WeightEntry) => void;
-  menuTemplate: MenuTemplateItem[];
-  onSaveTemplate: (t: MenuTemplateItem[]) => void;
+  weeklyMenu: WeeklyMenu;
+  onSaveWeeklyMenu: (m: WeeklyMenu) => void;
 }) {
+  const todayDay = new Date().getDay();
+  const todayMenu = weeklyMenu[todayDay] ?? DEFAULT_MENU;
   const [session, setSession] = useState<TrainingSession>(
-    () => todaySession ?? makeDefaultSession(menuTemplate)
+    () => todaySession ?? makeDefaultSession(todayMenu)
   );
   const todayWeightEntry = weightLog.find((e) => e.date === todayStr());
   const [weightInput, setWeightInput] = useState(
     () => todayWeightEntry ? String(todayWeightEntry.kg) : String(profile.bodyweightKg)
   );
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
-  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [showMenuMgr, setShowMenuMgr] = useState(false);
+  const [menuDay, setMenuDay] = useState(todayDay);
 
   function getRaw(ei: number, si: number, field: "weight" | "reps"): string {
     const key = `${ei}-${si}-${field}`;
@@ -391,35 +396,13 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
     if (todaySession) setSession(todaySession);
   }, [todaySession?.id]);
 
-  const totalSets = session.exercises.reduce((a, ex) => a + ex.sets.length, 0);
-  const doneSets  = session.exercises.reduce((a, ex) => a + ex.sets.filter((s) => s.completed).length, 0);
-
-  function updateSet(ei: number, si: number, field: "weight" | "reps", raw: string) {
-    const val = parseFloat(raw);
-    if (isNaN(val) || val < 0) return;
-    setSession((prev) => ({
-      ...prev,
-      exercises: prev.exercises.map((ex, i) =>
-        i !== ei ? ex : { ...ex, sets: ex.sets.map((s, j) => j !== si ? s : { ...s, [field]: val }) }
-      ),
-    }));
-  }
-  function toggleSet(ei: number, si: number) {
-    if (session.completed) return;
-    setSession((prev) => ({
-      ...prev,
-      exercises: prev.exercises.map((ex, i) =>
-        i !== ei ? ex : { ...ex, sets: ex.sets.map((s, j) => j !== si ? s : { ...s, completed: !s.completed }) }
-      ),
-    }));
-  }
   function addSet(ei: number) {
     setSession((prev) => ({
       ...prev,
       exercises: prev.exercises.map((ex, i) => {
         if (i !== ei) return ex;
         const last = ex.sets[ex.sets.length - 1];
-        return { ...ex, sets: [...ex.sets, { weight: last?.weight ?? 60, reps: last?.reps ?? 5, completed: false }] };
+        return { ...ex, sets: [...ex.sets, { weight: last?.weight ?? 60, reps: last?.reps ?? 5, completed: true }] };
       }),
     }));
   }
@@ -449,28 +432,37 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
       exercises: prev.exercises.filter((_, i) => i !== ei),
     }));
   }
-  function finish() {
-    const s: TrainingSession = { ...session, completed: true, savedAt: new Date().toISOString() };
+  function save() {
+    // 全セットをcompleted:trueにしてからsave（サマリー集計用）
+    const s: TrainingSession = {
+      ...session,
+      completed: true,
+      savedAt: new Date().toISOString(),
+      exercises: session.exercises.map((ex) => ({
+        ...ex,
+        sets: ex.sets.map((st) => ({ ...st, completed: true })),
+      })),
+    };
     setSession(s);
     onSave(s);
 
-    // メニューテンプレートを保存（次回のデフォルトに使用）
-    const newTemplate: MenuTemplateItem[] = s.exercises.map((ex) => ({
+    // 今日の曜日メニューを更新（次回デフォルトに使用）
+    const newDayMenu: MenuTemplateItem[] = s.exercises.map((ex) => ({
       exercise: ex.name,
       sets: ex.sets.length,
       reps: ex.sets[0]?.reps ?? 8,
       weightKg: ex.sets[0]?.weight ?? 60,
     }));
-    onSaveTemplate(newTemplate);
+    onSaveWeeklyMenu({ ...weeklyMenu, [todayDay]: newDayMenu });
 
-    // 1RM自動更新
+    // 1RM自動更新（全セット対象）
     let updated = { ...profile };
     let didUpdate = false;
     s.exercises.forEach((ex) => {
       const field = BIG3_MAP[ex.name];
       if (!field) return;
       const best = ex.sets
-        .filter((st) => st.completed && st.weight > 0 && st.reps >= 1 && st.reps <= 30)
+        .filter((st) => st.weight > 0 && st.reps >= 1 && st.reps <= 30)
         .reduce((max, st) => {
           try {
             const est = estimateOneRepMax(st.weight, st.reps);
@@ -486,8 +478,14 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
       onUpdateProfile(updated);
       onToast("1RMを自動更新しました！");
     } else {
-      onToast("トレーニングを記録しました！");
+      onToast("保存しました！");
     }
+  }
+
+  // 週間メニューの曜日別エディタ用ヘルパー
+  const editingMenu = weeklyMenu[menuDay] ?? DEFAULT_MENU;
+  function updateEditingMenu(updated: MenuTemplateItem[]) {
+    onSaveWeeklyMenu({ ...weeklyMenu, [menuDay]: updated });
   }
 
   return (
@@ -497,101 +495,59 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
           <p className="text-xs text-slate-500 uppercase tracking-widest">{fmtDate(session.date)}</p>
           <h2 className="text-xl font-bold">トレーニング記録</h2>
         </div>
-        <div className="flex items-center gap-2">
-          {!session.completed && totalSets > 0 && (
-            <div className="text-right">
-              <p className="text-2xl font-black text-lime-400">{doneSets}<span className="text-slate-500 text-sm font-normal">/{totalSets}</span></p>
-              <p className="text-[10px] text-slate-500">完了セット</p>
-            </div>
-          )}
-          <button
-            onClick={() => setShowTemplateEditor((v) => !v)}
-            className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${showTemplateEditor ? "border-lime-400/40 bg-lime-400/10 text-lime-400" : "border-[#1a2f5a] text-slate-400 hover:text-white hover:border-slate-500"}`}
-          >
-            📋 メニュー管理
-          </button>
-        </div>
+        <button
+          onClick={() => setShowMenuMgr((v) => !v)}
+          className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${showMenuMgr ? "border-lime-400/40 bg-lime-400/10 text-lime-400" : "border-[#1a2f5a] text-slate-400 hover:text-white hover:border-slate-500"}`}
+        >
+          📋 メニュー管理
+        </button>
       </div>
 
-      {/* テンプレートエディタ */}
-      {showTemplateEditor && (
+      {/* 週間メニュー管理パネル */}
+      {showMenuMgr && (
         <div className="rounded-2xl border border-lime-400/20 bg-[#0a1224] p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-bold text-lime-400">デフォルトメニューを編集</p>
-            <p className="text-[10px] text-slate-500">次回セッションから反映されます</p>
+          <p className="text-sm font-bold text-lime-400">週間デフォルトメニュー</p>
+          {/* 曜日タブ */}
+          <div className="flex gap-1">
+            {DAY_LABELS.map((label, d) => (
+              <button key={d} onClick={() => setMenuDay(d)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  menuDay === d
+                    ? d === todayDay ? "bg-lime-400 text-[#060c18]" : "bg-[#1a2f5a] text-white"
+                    : d === todayDay ? "bg-lime-400/15 text-lime-400 border border-lime-400/30" : "bg-[#0e1a36] text-slate-500 hover:text-white"
+                }`}
+              >{label}</button>
+            ))}
           </div>
+          {/* 選択中の曜日のメニュー */}
           <div className="space-y-2">
-            {menuTemplate.map((item, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={item.exercise}
-                  onChange={(e) => {
-                    const updated = menuTemplate.map((m, j) => j === i ? { ...m, exercise: e.target.value } : m);
-                    onSaveTemplate(updated);
-                  }}
-                  className="flex-1 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-2 text-sm focus:outline-none focus:border-lime-400/50"
-                  placeholder="種目名"
-                />
-                <input
-                  type="text" inputMode="decimal"
-                  value={String(item.weightKg)}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v) && v >= 0) {
-                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, weightKg: v } : m);
-                      onSaveTemplate(updated);
-                    }
-                  }}
-                  className="w-16 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
-                  placeholder="重量"
-                />
-                <span className="text-xs text-slate-500">kg</span>
-                <input
-                  type="text" inputMode="numeric"
-                  value={String(item.reps)}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!isNaN(v) && v > 0) {
-                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, reps: v } : m);
-                      onSaveTemplate(updated);
-                    }
-                  }}
-                  className="w-12 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
-                  placeholder="回数"
-                />
-                <span className="text-xs text-slate-500">rep</span>
-                <input
-                  type="text" inputMode="numeric"
-                  value={String(item.sets)}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!isNaN(v) && v > 0) {
-                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, sets: v } : m);
-                      onSaveTemplate(updated);
-                    }
-                  }}
-                  className="w-12 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
-                  placeholder="セット"
-                />
-                <span className="text-xs text-slate-500">set</span>
-                <button
-                  onClick={() => onSaveTemplate(menuTemplate.filter((_, j) => j !== i))}
-                  className="text-slate-500 hover:text-red-400 transition-colors text-sm px-1"
-                >✕</button>
+            {editingMenu.map((item, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                <input type="text" value={item.exercise}
+                  onChange={(e) => updateEditingMenu(editingMenu.map((m, j) => j === i ? { ...m, exercise: e.target.value } : m))}
+                  className="flex-1 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2.5 py-1.5 text-sm focus:outline-none focus:border-lime-400/50" placeholder="種目名" />
+                <input type="text" inputMode="decimal" value={String(item.weightKg)}
+                  onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) updateEditingMenu(editingMenu.map((m, j) => j === i ? { ...m, weightKg: v } : m)); }}
+                  className="w-14 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-1.5 py-1.5 text-sm text-center focus:outline-none focus:border-lime-400/50" placeholder="kg" />
+                <span className="text-[10px] text-slate-500">kg</span>
+                <input type="text" inputMode="numeric" value={String(item.reps)}
+                  onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) updateEditingMenu(editingMenu.map((m, j) => j === i ? { ...m, reps: v } : m)); }}
+                  className="w-10 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-1 py-1.5 text-sm text-center focus:outline-none focus:border-lime-400/50" placeholder="rep" />
+                <span className="text-[10px] text-slate-500">rep</span>
+                <input type="text" inputMode="numeric" value={String(item.sets)}
+                  onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) updateEditingMenu(editingMenu.map((m, j) => j === i ? { ...m, sets: v } : m)); }}
+                  className="w-10 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-1 py-1.5 text-sm text-center focus:outline-none focus:border-lime-400/50" placeholder="set" />
+                <span className="text-[10px] text-slate-500">set</span>
+                <button onClick={() => updateEditingMenu(editingMenu.filter((_, j) => j !== i))}
+                  className="text-slate-500 hover:text-red-400 transition-colors text-sm px-1">✕</button>
               </div>
             ))}
           </div>
-          <button
-            onClick={() => onSaveTemplate([...menuTemplate, { exercise: "新しい種目", sets: 3, reps: 8, weightKg: 60 }])}
-            className="w-full rounded-xl border border-dashed border-[#1a2f5a] py-2 text-xs text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors"
-          >＋ 種目を追加</button>
-        </div>
-      )}
-
-      {!session.completed && totalSets > 0 && (
-        <div className="h-1.5 w-full rounded-full bg-[#0e1a36] overflow-hidden">
-          <div className="h-full rounded-full bg-lime-400 transition-all duration-500" style={{ width:`${(doneSets/totalSets)*100}%` }} />
+          <button onClick={() => updateEditingMenu([...editingMenu, { exercise: "新しい種目", sets: 3, reps: 8, weightKg: 60 }])}
+            className="w-full rounded-xl border border-dashed border-[#1a2f5a] py-2 text-xs text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors">
+            ＋ 種目を追加
+          </button>
+          <p className="text-[10px] text-slate-500 text-center">今日（{DAY_LABELS[todayDay]}）は <span className="text-lime-400">緑</span> で表示。保存後に次回セッションへ反映されます</p>
         </div>
       )}
 
@@ -638,8 +594,7 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
                   type="text"
                   value={ex.name}
                   onChange={(e) => renameExercise(ei, e.target.value)}
-                  disabled={session.completed}
-                  className="text-sm font-bold bg-transparent border-b border-transparent focus:border-lime-400/50 focus:outline-none w-full disabled:cursor-default"
+                  className="text-sm font-bold bg-transparent border-b border-transparent focus:border-lime-400/50 focus:outline-none w-full"
                 />
                 {ex.sets.length > 0 && ex.sets[0].weight > 0 && ex.sets[0].reps >= 1 && ex.sets[0].reps <= 30 && (
                   <p className="text-xs text-slate-500">推定1RM: {estimateOneRepMax(ex.sets[0].weight, ex.sets[0].reps)}kg</p>
@@ -648,63 +603,48 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <p className="text-xs text-slate-500">{ex.sets.length}セット</p>
-              {!session.completed && (
-                <button onClick={() => removeExercise(ei)} className="text-slate-500 hover:text-red-400 text-xs transition-colors ml-1">✕</button>
-              )}
+              <button onClick={() => removeExercise(ei)} className="text-slate-500 hover:text-red-400 text-xs transition-colors ml-1">✕</button>
             </div>
           </div>
 
           {/* セット行 */}
           <div className="px-4 pt-3 pb-1">
-            <div className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] gap-2 mb-1.5 text-[10px] text-slate-500 px-1">
-              <span>#</span><span className="text-center">重量 (kg)</span><span className="text-center">回数</span><span></span>
+            <div className="grid grid-cols-[1.5rem_1fr_1fr] gap-2 mb-1.5 text-[10px] text-slate-500 px-1">
+              <span>#</span><span className="text-center">重量 (kg)</span><span className="text-center">回数</span>
             </div>
             {ex.sets.map((s, si) => (
-              <div key={si} className="grid grid-cols-[1.5rem_1fr_1fr_2.5rem] gap-2 mb-2 items-center">
+              <div key={si} className="grid grid-cols-[1.5rem_1fr_1fr] gap-2 mb-2 items-center">
                 <span className="text-[11px] text-slate-500 text-center">{si+1}</span>
-                <input type="text" inputMode="decimal" value={getRaw(ei, si, "weight")} onChange={(e) => handleSetInput(ei, si, "weight", e.target.value)} onBlur={() => handleSetBlur(ei, si, "weight")} disabled={session.completed}
-                  className="rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center font-bold disabled:opacity-50 focus:outline-none focus:border-lime-400/50 w-full" />
-                <input type="text" inputMode="numeric" value={getRaw(ei, si, "reps")} onChange={(e) => handleSetInput(ei, si, "reps", e.target.value)} onBlur={() => handleSetBlur(ei, si, "reps")} disabled={session.completed}
-                  className="rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center font-bold disabled:opacity-50 focus:outline-none focus:border-lime-400/50 w-full" />
-                <button onClick={() => session.completed ? undefined : toggleSet(ei, si)}
-                  className={`w-9 h-9 rounded-lg text-sm font-bold transition-all ${
-                    s.completed ? "bg-lime-400 text-[#060c18]"
-                    : session.completed ? "bg-[#0e1a36] border border-[#1a2f5a]/50 text-slate-600 cursor-not-allowed"
-                    : "bg-[#0e1a36] border border-[#1a2f5a] text-slate-400 hover:border-lime-400/40"
-                  }`}>{s.completed ? "✓" : "○"}</button>
+                <input type="text" inputMode="decimal" value={getRaw(ei, si, "weight")} onChange={(e) => handleSetInput(ei, si, "weight", e.target.value)} onBlur={() => handleSetBlur(ei, si, "weight")}
+                  className="rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center font-bold focus:outline-none focus:border-lime-400/50 w-full" />
+                <input type="text" inputMode="numeric" value={getRaw(ei, si, "reps")} onChange={(e) => handleSetInput(ei, si, "reps", e.target.value)} onBlur={() => handleSetBlur(ei, si, "reps")}
+                  className="rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-1.5 text-sm text-center font-bold focus:outline-none focus:border-lime-400/50 w-full" />
               </div>
             ))}
           </div>
-          {!session.completed && (
-            <div className="px-4 pb-3 flex gap-2">
-              <button onClick={() => addSet(ei)} className="flex-1 rounded-lg border border-dashed border-[#1a2f5a] py-1.5 text-xs text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors">+ セット追加</button>
-              {ex.sets.length > 1 && (
-                <button onClick={() => removeSet(ei, ex.sets.length - 1)} className="px-3 rounded-lg border border-[#1a2f5a] text-xs text-slate-500 hover:border-red-500/30 hover:text-red-400 transition-colors">−</button>
-              )}
-            </div>
-          )}
+          <div className="px-4 pb-3 flex gap-2">
+            <button onClick={() => addSet(ei)} className="flex-1 rounded-lg border border-dashed border-[#1a2f5a] py-1.5 text-xs text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors">+ セット追加</button>
+            {ex.sets.length > 1 && (
+              <button onClick={() => removeSet(ei, ex.sets.length - 1)} className="px-3 rounded-lg border border-[#1a2f5a] text-xs text-slate-500 hover:border-red-500/30 hover:text-red-400 transition-colors">−</button>
+            )}
+          </div>
         </div>
       ))}
 
-      {!session.completed && (
-        <button onClick={addExercise}
-          className="w-full rounded-2xl border-2 border-dashed border-[#1a2f5a] py-3 text-sm text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors">
-          ＋ 種目を追加
-        </button>
-      )}
+      <button onClick={addExercise}
+        className="w-full rounded-2xl border-2 border-dashed border-[#1a2f5a] py-3 text-sm text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors">
+        ＋ 種目を追加
+      </button>
 
-      {session.completed ? (
-        <div className="rounded-2xl border border-lime-400/30 bg-lime-400/5 p-5 text-center">
-          <p className="text-2xl mb-1">🏆</p>
-          <p className="font-black text-lime-400 text-lg">記録済み！</p>
-          <p className="text-xs text-slate-500 mt-1">{session.savedAt ? new Date(session.savedAt).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"}) : ""}に保存しました</p>
-        </div>
-      ) : (
-        <button onClick={finish} disabled={doneSets === 0}
-          className="w-full rounded-2xl bg-lime-400 py-4 font-black text-[#060c18] text-base tracking-wide hover:bg-lime-300 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-          style={{ boxShadow: doneSets > 0 ? "0 4px 24px rgba(163,230,53,0.35)" : undefined }}>
-          ✓ 完了として保存する
-        </button>
+      <button onClick={save}
+        className="w-full rounded-2xl bg-lime-400 py-4 font-black text-[#060c18] text-base tracking-wide hover:bg-lime-300 active:scale-95 transition-all shadow-lg"
+        style={{ boxShadow: "0 4px 24px rgba(163,230,53,0.35)" }}>
+        💾 保存する
+      </button>
+      {session.savedAt && (
+        <p className="text-center text-xs text-slate-500">
+          最終保存: {new Date(session.savedAt).toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"})}
+        </p>
       )}
     </div>
   );
@@ -734,6 +674,8 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<MealForm>(EMPTY_FORM);
   const [calcLoading, setCalcLoading] = useState(false);
+  const [adviceLoading, setAdviceLoading] = useState(false);
+  const [advice, setAdvice] = useState("");
 
   async function autoCalc() {
     if (!form.name.trim() || calcLoading) return;
@@ -768,6 +710,38 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
   const totalF    = entries.reduce((a, e) => a + e.fat, 0);
   const totalC    = entries.reduce((a, e) => a + e.carbs, 0);
   const TARGET_KCAL = 2800;
+
+  async function getAdvice() {
+    if (adviceLoading) return;
+    setAdviceLoading(true);
+    setAdvice("");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{
+            role: "user",
+            content: `今日の食事データを分析して、不足している栄養素と改善案を簡潔に教えてください。\n\nカロリー: ${totalKcal}kcal / 目標2800kcal\nタンパク質: ${totalP}g / 目標180g\n脂質: ${totalF}g / 目標70g\n炭水化物: ${totalC}g / 目標350g\n食事内容: ${entries.map((e) => e.name).join(", ") || "未記録"}`,
+          }],
+          systemContext: "あなたは栄養士AIです。短く箇条書きで、不足栄養素と補うべき具体的な食品を3〜5点で提案してください。",
+        }),
+      });
+      if (!res.body) throw new Error();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+        setAdvice(text.replace(/\n__USAGE__.+?__USAGE__/, "").trimEnd());
+      }
+      setAdvice((t) => t.replace(/\n__USAGE__.+?__USAGE__/, "").trimEnd());
+    } catch { setAdvice("診断に失敗しました。"); } finally {
+      setAdviceLoading(false);
+    }
+  }
 
   function handleAdd() {
     if (!form.name.trim() || !form.mealType) return;
@@ -828,6 +802,25 @@ function MealTab({ todayMeals, onAdd, onRemove, onToast }: {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* AI栄養診断 */}
+      <div className="rounded-2xl border border-[#1a2f5a] bg-[#0a1224] overflow-hidden">
+        <button
+          onClick={getAdvice}
+          disabled={adviceLoading || entries.length === 0}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm hover:bg-[#0e1a36]/50 transition-colors disabled:opacity-40"
+        >
+          <span className="font-semibold text-slate-300">
+            {adviceLoading ? <><span className="animate-spin inline-block mr-1.5">⏳</span>診断中...</> : "🤖 AIに栄養診断してもらう"}
+          </span>
+          <span className="text-xs text-slate-500">{entries.length === 0 ? "食事を記録してから" : "不足栄養素を指摘"}</span>
+        </button>
+        {advice && (
+          <div className="px-4 pb-4 border-t border-[#1a2f5a]/50">
+            <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap mt-3">{advice}</p>
+          </div>
+        )}
       </div>
 
       {/* エントリーリスト */}
