@@ -146,7 +146,7 @@ export default function App() {
       {/* ── サイドバー（PC） ── */}
       <aside className="hidden lg:flex flex-col fixed top-0 left-0 h-full w-52 border-r border-[#1a2f5a]/50 bg-[#070d1b] z-40">
         <div className="px-5 py-4 border-b border-[#1a2f5a]/40">
-          <span className="text-lg font-black tracking-tight">BIG3<span className="gradient-text-lime">TRAINER</span></span>
+          <span className="text-lg font-black tracking-tight">Fit<span className="gradient-text-lime">Log</span></span>
         </div>
         <div className="px-4 py-3 border-b border-[#1a2f5a]/30">
           <div className="flex items-center gap-2.5">
@@ -187,7 +187,7 @@ export default function App() {
       <div className="flex-1 lg:ml-52 flex flex-col min-h-screen">
         <header className="sticky top-0 z-30 border-b border-[#1a2f5a]/60 bg-[#060c18]/90 backdrop-blur-md">
           <div className="flex items-center justify-between px-5 py-3 max-w-5xl mx-auto">
-            <span className="lg:hidden text-base font-black">BIG3<span className="gradient-text-lime">TRAINER</span></span>
+            <span className="lg:hidden text-base font-black">Fit<span className="gradient-text-lime">Log</span></span>
             <h1 className="hidden lg:block text-sm font-semibold text-slate-400">{NAV_SIDEBAR.find((n) => n.id === activeTab)?.label}</h1>
             <div className="flex items-center gap-3">
               <span className="text-xs text-slate-500 hidden sm:block">{new Date().toLocaleDateString("ja-JP",{month:"long",day:"numeric",weekday:"short"})}</span>

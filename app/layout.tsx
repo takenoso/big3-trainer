@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "BIG3 TRAINER | パワーリフティング最適化AI",
-  description: "科学的根拠に基づきBIG3を向上させるAIパーソナルトレーナー",
+  title: "FitLog | AIフィットネストレーカー",
+  description: "トレーニング・食事・体重をAIと一緒に記録・分析するフィットネスアプリ",
   icons: {
     icon: [
       { url: "/icon.svg", type: "image/svg+xml" },
