@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: #060c18;
+  color: #f8fafc;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #0a1224; }
+::-webkit-scrollbar-thumb { background: #1a2f5a; border-radius: 3px; }
+
+.gradient-text-lime {
+  background: linear-gradient(135deg, #a3e635, #65a30d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.card-hover { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.card-hover:hover { transform: translateY(-1px); }
+
+/* チャットタイピングアニメーション */
+@keyframes blink { 0%,100%{opacity:0.2} 50%{opacity:1} }
+.typing-dot { animation: blink 1.4s infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes cursor-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+.streaming-cursor::after {
+  content: "▍";
+  display: inline-block;
+  animation: cursor-blink 0.8s infinite;
+  color: #a3e635;
+  font-size: 0.875em;
+}
+
+/* ランクアップ演出 */
+@keyframes rankUp {
+  0%  { transform: scale(0.5); opacity: 0; }
+  70% { transform: scale(1.1); }
+  100%{ transform: scale(1);   opacity: 1; }
+}
+.rank-up { animation: rankUp 0.5s ease-out; }
+
+/* トースト */
+@keyframes slideUp { from{transform:translateY(100%);opacity:0} to{transform:translateY(0);opacity:1} }
+.toast { animation: slideUp 0.3s ease-out; }
+
+/* 数値インプット（矢印非表示） */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+input[type=number] { -moz-appearance: textfield; }
