@@ -322,9 +322,9 @@ function HomeTab({ profile, stats, todaySession, todayMeals, onNavigate, weightL
             <button onClick={() => onNavigate("meal")}
               className="rounded-xl p-3 border border-[#1a2f5a] bg-[#0e1a36] hover:bg-[#1a2f5a] transition-colors text-left">
               <p className="text-xs text-slate-400 mb-1">食事</p>
-              <p className="text-sm font-black">{sig1(todayKcal)}<span className="text-slate-400 font-normal text-xs"> kcal</span></p>
+              <p className="text-sm font-black">{todayKcal.toFixed(1)}<span className="text-slate-400 font-normal text-xs"> kcal</span></p>
               {todayKcal > 0 && (
-                <p className="text-[10px] text-slate-500 mt-0.5">P:{sig1(todayP)} F:{sig1(todayF)} C:{sig1(todayC)}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">P:{todayP.toFixed(1)} F:{todayF.toFixed(1)} C:{todayC.toFixed(1)}</p>
               )}
             </button>
           </div>
@@ -889,11 +889,11 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast, mealGoal, onS
         <div className="flex items-end justify-between mb-3">
           <div>
             <p className="text-xs text-slate-500">摂取カロリー</p>
-            <p className="text-3xl font-black">{sig1(totalKcal)}<span className="text-sm text-slate-400 font-normal"> kcal</span></p>
+            <p className="text-3xl font-black">{totalKcal.toFixed(1)}<span className="text-sm text-slate-400 font-normal"> kcal</span></p>
           </div>
           <button onClick={() => { setGoalForm({ kcal: String(mealGoal.kcal), protein: String(mealGoal.protein), fat: String(mealGoal.fat), carbs: String(mealGoal.carbs) }); setShowGoalEdit((v) => !v); }}
             className="text-xs text-slate-400 hover:text-lime-400 transition-colors flex items-center gap-1">
-            ⚙️ 目標 <span className="font-bold text-white">{sig1(mealGoal.kcal)}</span> kcal
+            ⚙️ 目標 <span className="font-bold text-white">{mealGoal.kcal.toFixed(1)}</span> kcal
           </button>
         </div>
         {showGoalEdit && (
@@ -937,8 +937,8 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast, mealGoal, onS
           ].map(({ label, name, value, target, color }) => (
             <div key={label} className="rounded-xl bg-[#0e1a36] p-2.5 text-center">
               <p className="text-[10px] text-slate-500 mb-0.5">{name}</p>
-              <p className="text-base font-black" style={{ color }}>{sig1(value)}<span className="text-xs text-slate-500">g</span></p>
-              <p className="text-[10px] text-slate-500">{sig1(target)}g目標</p>
+              <p className="text-base font-black" style={{ color }}>{value.toFixed(1)}<span className="text-xs text-slate-500">g</span></p>
+              <p className="text-[10px] text-slate-500">{target.toFixed(1)}g目標</p>
             </div>
           ))}
         </div>
@@ -1035,11 +1035,11 @@ function MealTab({ todayMeals, onAdd, onRemove, onUpdate, onToast, mealGoal, onS
                       {e.name}
                       {e.amount && <span className="text-xs text-slate-400 font-normal ml-1.5">{e.amount}{e.unit}</span>}
                     </p>
-                    <p className="text-xs text-slate-500">P:{sig1(e.protein)} F:{sig1(e.fat)} C:{sig1(e.carbs)}g</p>
+                    <p className="text-xs text-slate-500">P:{e.protein.toFixed(1)} F:{e.fat.toFixed(1)} C:{e.carbs.toFixed(1)}g</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-black">{sig1(e.kcal)}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
+                  <p className="text-sm font-black">{e.kcal.toFixed(1)}<span className="text-xs text-slate-500 font-normal">kcal</span></p>
                   <span className="text-slate-500 text-xs">✏️</span>
                 </div>
               </button>
