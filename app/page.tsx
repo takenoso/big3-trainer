@@ -356,6 +356,7 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
     () => todayWeightEntry ? String(todayWeightEntry.kg) : String(profile.bodyweightKg)
   );
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
 
   function getRaw(ei: number, si: number, field: "weight" | "reps"): string {
     const key = `${ei}-${si}-${field}`;
@@ -496,13 +497,97 @@ function TrainingTab({ todaySession, onSave, onToast, profile, onUpdateProfile, 
           <p className="text-xs text-slate-500 uppercase tracking-widest">{fmtDate(session.date)}</p>
           <h2 className="text-xl font-bold">トレーニング記録</h2>
         </div>
-        {!session.completed && totalSets > 0 && (
-          <div className="text-right">
-            <p className="text-2xl font-black text-lime-400">{doneSets}<span className="text-slate-500 text-sm font-normal">/{totalSets}</span></p>
-            <p className="text-[10px] text-slate-500">完了セット</p>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {!session.completed && totalSets > 0 && (
+            <div className="text-right">
+              <p className="text-2xl font-black text-lime-400">{doneSets}<span className="text-slate-500 text-sm font-normal">/{totalSets}</span></p>
+              <p className="text-[10px] text-slate-500">完了セット</p>
+            </div>
+          )}
+          <button
+            onClick={() => setShowTemplateEditor((v) => !v)}
+            className={`rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${showTemplateEditor ? "border-lime-400/40 bg-lime-400/10 text-lime-400" : "border-[#1a2f5a] text-slate-400 hover:text-white hover:border-slate-500"}`}
+          >
+            📋 メニュー管理
+          </button>
+        </div>
       </div>
+
+      {/* テンプレートエディタ */}
+      {showTemplateEditor && (
+        <div className="rounded-2xl border border-lime-400/20 bg-[#0a1224] p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-bold text-lime-400">デフォルトメニューを編集</p>
+            <p className="text-[10px] text-slate-500">次回セッションから反映されます</p>
+          </div>
+          <div className="space-y-2">
+            {menuTemplate.map((item, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={item.exercise}
+                  onChange={(e) => {
+                    const updated = menuTemplate.map((m, j) => j === i ? { ...m, exercise: e.target.value } : m);
+                    onSaveTemplate(updated);
+                  }}
+                  className="flex-1 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-3 py-2 text-sm focus:outline-none focus:border-lime-400/50"
+                  placeholder="種目名"
+                />
+                <input
+                  type="text" inputMode="decimal"
+                  value={String(item.weightKg)}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!isNaN(v) && v >= 0) {
+                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, weightKg: v } : m);
+                      onSaveTemplate(updated);
+                    }
+                  }}
+                  className="w-16 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
+                  placeholder="重量"
+                />
+                <span className="text-xs text-slate-500">kg</span>
+                <input
+                  type="text" inputMode="numeric"
+                  value={String(item.reps)}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v > 0) {
+                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, reps: v } : m);
+                      onSaveTemplate(updated);
+                    }
+                  }}
+                  className="w-12 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
+                  placeholder="回数"
+                />
+                <span className="text-xs text-slate-500">rep</span>
+                <input
+                  type="text" inputMode="numeric"
+                  value={String(item.sets)}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v > 0) {
+                      const updated = menuTemplate.map((m, j) => j === i ? { ...m, sets: v } : m);
+                      onSaveTemplate(updated);
+                    }
+                  }}
+                  className="w-12 rounded-lg bg-[#0e1a36] border border-[#1a2f5a] px-2 py-2 text-sm text-center focus:outline-none focus:border-lime-400/50"
+                  placeholder="セット"
+                />
+                <span className="text-xs text-slate-500">set</span>
+                <button
+                  onClick={() => onSaveTemplate(menuTemplate.filter((_, j) => j !== i))}
+                  className="text-slate-500 hover:text-red-400 transition-colors text-sm px-1"
+                >✕</button>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => onSaveTemplate([...menuTemplate, { exercise: "新しい種目", sets: 3, reps: 8, weightKg: 60 }])}
+            className="w-full rounded-xl border border-dashed border-[#1a2f5a] py-2 text-xs text-slate-500 hover:border-lime-400/30 hover:text-lime-400 transition-colors"
+          >＋ 種目を追加</button>
+        </div>
+      )}
 
       {!session.completed && totalSets > 0 && (
         <div className="h-1.5 w-full rounded-full bg-[#0e1a36] overflow-hidden">
