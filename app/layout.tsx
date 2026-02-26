@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FitLog | AIフィットネストレーカー",
+  title: "Fitlog",
   description: "トレーニング・食事・体重をAIと一緒に記録・分析するフィットネスアプリ",
   icons: {
     icon: [
